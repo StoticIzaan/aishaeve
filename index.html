@@ -47,7 +47,7 @@ body.opened #gate{opacity:0;visibility:hidden;transform:scale(1.1)}
 .gbow{width:clamp(130px,34vw,190px);animation:bob 4s ease-in-out infinite;filter:drop-shadow(0 10px 18px rgba(214,100,140,.35))}
 .gscript{font-family:var(--script);font-weight:700;font-size:clamp(46px,13vw,84px);margin:0;color:var(--deep);line-height:1}
 .gsmall{margin:0 0 14px;font-weight:600;color:var(--rose);font-size:15px}
-.gbtn{font:700 17px var(--sans);color:#fff;border:0;border-radius:999px;padding:15px 30px;cursor:pointer;background:linear-gradient(180deg,#f58cb0,#e0618d);box-shadow:0 10px 24px rgba(224,97,141,.45),0 0 0 4px rgba(255,255,255,.8)}
+.gbtn{touch-action:manipulation;font:700 17px var(--sans);color:#fff;border:0;border-radius:999px;padding:15px 30px;cursor:pointer;background:linear-gradient(180deg,#f58cb0,#e0618d);box-shadow:0 10px 24px rgba(224,97,141,.45),0 0 0 4px rgba(255,255,255,.8)}
 .gbtn:active{transform:scale(.96)}
 .glink{font:600 14px var(--sans);color:var(--rose);background:none;border:0;padding:8px;cursor:pointer;text-decoration:underline}
 .gbtn:focus-visible,.glink:focus-visible{outline:3px solid var(--rose);outline-offset:3px}
@@ -126,6 +126,10 @@ footer{position:relative;z-index:2;font-family:var(--script);font-weight:700;fon
 </style>
 </head>
 <body>
+<script>
+/* safety net: the start button always opens the page, even if the main script fails */
+document.addEventListener('click',function(e){var t=e.target;if(t&&t.closest&&t.closest('#gate')&&document.body)document.body.classList.add('opened');});
+</script>
 <div id="float" aria-hidden="true"></div>
 <canvas id="confetti" aria-hidden="true"></canvas>
 
@@ -238,14 +242,14 @@ function setCandles(n){
 }
 
 /* ---------- sound (Web Audio, no files) ---------- */
-function note(f, t0, dur, type, vol, glide){
+function note(f, t0, dur, type, vol, glide, dest){
   var o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + t0;
   o.type = type||'sine'; o.frequency.setValueAtTime(f, t);
   if(glide) o.frequency.exponentialRampToValueAtTime(glide, t+dur);
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(vol, t+0.012);
   g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.05);
+  o.connect(g); g.connect(dest||master); o.start(t); o.stop(t+dur+0.05);
 }
 var S = {
   pop: function(){ note(520,0,.09,'sine',.22,900); },
@@ -256,6 +260,37 @@ var S = {
   fanfare: function(){ [[523,0],[523,.16],[659,.32],[784,.5],[659,.7],[784,.86],[1047,1.05]].forEach(function(a){ note(a[0],a[1],.28,'triangle',.13); note(a[0]*2,a[1],.2,'sine',.04); }); },
   confetti: function(){ note(900,0,.07,'sine',.1,300); note(1400,.05,.05,'sine',.06,600); }
 };
+/* soft music-box lullaby, generated live: C - Am - F - G, slow and quiet */
+var mus = {bus:null, timer:0, next:0, step:0};
+var CH = [[261.63,329.63,392,523.25],[220,261.63,329.63,440],[261.63,349.23,440,523.25],[246.94,293.66,392,493.88]];
+var PAT = [0,1,2,3,2,1,2,1];
+function startMusic(){
+  if(!ctx || mus.timer) return;
+  if(!mus.bus){
+    var b = ctx.createGain(), dl = ctx.createDelay(1), fb = ctx.createGain(), wet = ctx.createGain();
+    b.gain.value = 0; dl.delayTime.value = .34; fb.gain.value = .35; wet.gain.value = .4;
+    b.connect(master); b.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(master);
+    mus.bus = b;
+  }
+  mus.bus.gain.cancelScheduledValues(ctx.currentTime);
+  mus.bus.gain.setTargetAtTime(.9, ctx.currentTime, .6);
+  mus.next = ctx.currentTime + .9;
+  mus.timer = setInterval(sched, 200);
+}
+function sched(){
+  if(!ctx) return;
+  while(mus.next < ctx.currentTime + .8){
+    var s = mus.step % 32, ch = CH[(s>>3)%4], i = s%8, t = Math.max(0, mus.next-ctx.currentTime), f = ch[PAT[i]];
+    note(f, t, 1.1, 'triangle', .05, 0, mus.bus); note(f*2, t, .5, 'sine', .014, 0, mus.bus);
+    if(i===0) note(ch[0]/2, t, 2.2, 'sine', .07, 0, mus.bus);
+    if(i===6) note(ch[3]*2, t, 1.4, 'sine', .02, 0, mus.bus);
+    mus.next += .46; mus.step++;
+  }
+}
+function stopMusic(){
+  if(mus.timer){ clearInterval(mus.timer); mus.timer = 0; }
+  if(mus.bus && ctx) mus.bus.gain.setTargetAtTime(0, ctx.currentTime, .12);
+}
 function play(name){ if(!soundOn||!ctx) return; try{ S[name](); }catch(e){} }
 function ensureAudio(){
   if(ctx) return ctx.state==='suspended' ? ctx.resume() : true;
@@ -267,6 +302,7 @@ var btn = $('snd');
 function setSound(on){
   soundOn = on; btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', on);
   btn.setAttribute('aria-label', on?'Turn sound off':'Turn sound on'); $('sndTxt').textContent = on?'sound on':'sound off';
+  if(on) startMusic(); else stopMusic();
 }
 btn.addEventListener('click', function(){
   $('hint').style.opacity = 0;
@@ -292,4 +328,82 @@ function openGate(withSound){
 $('goSound').addEventListener('click', function(){ openGate(true); });
 
 /* ---------- confetti ---------- */
-var cv
+var cv = $('confetti'), cx = cv.getContext('2d'), parts = [], raf = 0;
+function size(){ var r = window.devicePixelRatio||1; cv.width = innerWidth*r; cv.height = innerHeight*r; cx.setTransform(r,0,0,r,0,0); }
+addEventListener('resize', size); size();
+var COLORS = ['#ff9fbb','#ffc2d4','#fff','#e87a9f','#ffe3a8','#ffd3e2','#f7a8d8'];
+function confettiBurst(n){
+  if(reduce) n = Math.min(n, 25);
+  for(var i=0;i<n;i++){
+    var left = i%2===0;
+    parts.push({x:Math.random()*innerWidth, y:-10-Math.random()*innerHeight*.4,
+      vx:(Math.random()-.5)*3, vy:2+Math.random()*3, w:6+Math.random()*7, h:4+Math.random()*6,
+      r:Math.random()*6, vr:(Math.random()-.5)*.25, c:COLORS[(Math.random()*COLORS.length)|0], heart:Math.random()<.2, t:0});
+  }
+  play('confetti'); setTimeout(function(){ play('confetti'); }, 380); setTimeout(function(){ play('confetti'); }, 900);
+  if(!raf) raf = requestAnimationFrame(frame);
+}
+function frame(){
+  cx.clearRect(0,0,innerWidth,innerHeight);
+  parts = parts.filter(function(p){ return p.y < innerHeight+20; });
+  parts.forEach(function(p){
+    p.t++; p.x += p.vx + Math.sin(p.t/18+p.r)*.8; p.y += p.vy; p.vy += .015; p.r += p.vr;
+    cx.save(); cx.translate(p.x,p.y); cx.rotate(p.r); cx.fillStyle = p.c; cx.globalAlpha = .92;
+    if(p.heart){ cx.font = (p.w+6)+'px serif'; cx.fillText('♥',-4,4); } else cx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+    cx.restore();
+  });
+  raf = parts.length ? requestAnimationFrame(frame) : 0;
+  if(!raf) cx.clearRect(0,0,innerWidth,innerHeight);
+}
+
+/* ---------- floating decorations ---------- */
+(function(){
+  var box = $('float'), g = ['♡','✦','🎀','✧','♡','⋆','🎀'], n = reduce ? 4 : 7;
+  for(var i=0;i<n;i++){
+    var e = document.createElement('span'); e.className = 'fl'; e.textContent = g[i%g.length];
+    e.style.left = (Math.random()*96)+'%'; e.style.fontSize = (12+Math.random()*16)+'px';
+    e.style.animationDuration = (14+Math.random()*14)+'s'; e.style.animationDelay = (-Math.random()*24)+'s';
+    box.appendChild(e);
+  }
+})();
+
+/* ---------- countdown ---------- */
+function pad(v){ return v<10 ? '0'+v : ''+v; }
+function put(k, v){
+  if(last[k]===v) return; last[k] = v; els[k].textContent = v;
+  if(k==='s' && !reduce){ els.s.classList.remove('tick'); void els.s.offsetWidth; els.s.classList.add('tick'); }
+}
+function celebrate(live){
+  bday = true; document.body.classList.add('bday');
+  $('title').textContent = 'HAPPY BIRTHDAY, AISHAAAA!! 🎂';
+  document.title = 'Happy Birthday, Aisha! 🎂';
+  setCandles(7); $('hint').style.opacity = 0;
+  confettiBurst(live?160:110);
+  if(live){ play('chime'); setTimeout(function(){ play('burst'); }, 700); setTimeout(function(){ play('fanfare'); }, 1400); }
+  setTimeout(function(){ confettiBurst(90); }, 2600);
+}
+function tick(){
+  var ms = TARGET - Date.now();
+  if(ms <= 0){
+    if(!bday) celebrate(document.visibilityState==='visible' && lastCandleLevel>0);
+    put('d','00'); put('h','00'); put('m','00'); put('s','00'); return;
+  }
+  var t = Math.floor(ms/1000);
+  put('d', pad(Math.floor(t/86400))); put('h', pad(Math.floor(t%86400/3600)));
+  put('m', pad(Math.floor(t%3600/60))); put('s', pad(t%60));
+  var lv = levelFor(ms);
+  if(lv !== lastCandleLevel){
+    var rising = lastCandleLevel>0 && lv>lastCandleLevel;
+    lastCandleLevel = lv; setCandles(lv);
+    if(rising) setTimeout(function(){ play('sparkle'); }, 900);   // rare, only when a new candle lights
+  }
+}
+// If the page loads after midnight, go straight to the birthday state.
+if(TARGET - Date.now() <= 0){ celebrate(false); }
+tick(); setInterval(tick, 250);
+document.addEventListener('visibilitychange', tick);
+document.addEventListener('visibilitychange', function(){ if(document.hidden) stopMusic(); else if(soundOn) startMusic(); });
+})();
+</script>
+</body>
+</html>
